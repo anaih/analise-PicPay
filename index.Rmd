@@ -1,0 +1,153 @@
+---
+title: "Google Trends"
+author: "Anaih Pastana Pereira"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: picpay
+    highlight: github
+---
+
+```{r include=FALSE}
+knitr::opts_chunk$set(
+  warning = F,
+  message = F,
+  error = F,
+  eval = T,
+  fig.align = "center",
+  dpi = 150
+  )
+```
+
+## Introdução
+
+-   Essa é uma análise dos dados do Google Trends sobre o PicPay utilizando **R**. Esse relatório é gerado automaticamente a cada semana, utilizando a ferramenta **GitHub Actions** e *hosteando* no **GitHub Pages**.
+
+## Pacotes
+
+```{r}
+library(gtrendsR)
+library(dplyr)
+library(ggplot2)
+library(wordcloud2)
+library(stringr)
+library(RColorBrewer)
+library(ggrepel)
+```
+
+## Dados Google Trends
+
+-   O Google Trends é uma ferramenta que permite acompanhar a evolução do número de buscas por uma determinada palavra-chave ao longo do tempo. Nesse caso, acompanhamos a evolução da busca pela palavra **picpay** nos últmos 30 dias.
+
+```{r}
+dados_gt <- gtrends(keyword = "picpay",geo = "BR",time = "today 1-m")
+```
+
+## Interesse de pesquisa ao longo do tempo
+
+-   Os números representam o interesse de pesquisa relativo ao ponto mais alto no gráfico de um dado período.
+
+```{r}
+sig <- 0.01  #colocando a significancia para o intervalo de confianca
+
+df_cal <-  #Gerando um dataframe com as medidas para utilizar no grafico
+dados_gt$interest_over_time %>% 
+  summarise(media=mean(hits),
+            ic_inf=media-(qt(1-(sig/2),nrow(.))*(sd(hits)/sqrt(nrow(.)))),
+            ic_sup=media+(qt(1-(sig/2),nrow(.))*(sd(hits)/sqrt(nrow(.)))),
+            q_90=quantile(hits,0.90),
+            q_10=quantile(hits,0.10),
+            min_date=min(date))
+  
+
+dados_gt$interest_over_time %>%    #Grafico com o interesse a longo do tempo
+  mutate(flg_destaque=case_when(hits>=df_cal$q_90 ~ "Positivo",
+                                hits<=df_cal$q_10 ~ "Negativo",
+                                TRUE ~ "Neutro"), 
+         flg_sup=case_when(hits>=df_cal$q_90 ~ as.character(date),
+                                TRUE ~ NA_character_),
+         flg_inf=case_when(hits<=df_cal$q_10 ~ as.character(date),
+                                TRUE ~ NA_character_) )%>% 
+  ggplot(aes(date,hits))+
+  geom_line(col="lightgray")+
+  geom_point(aes(col=flg_destaque),cex=3,alpha=0.7)+
+  scale_color_manual(values=c('brown2','gray66', 'palegreen3'))+
+  geom_hline(yintercept = df_cal$media, color="darkgray")+
+  annotation_raster(alpha("gray30", .2),
+    xmin = -Inf, xmax = Inf,
+    ymin=df_cal$q_10 , ymax=df_cal$q_90) + 
+  theme_minimal()+
+  geom_label_repel(aes(label = flg_sup, fill = flg_destaque), color = 'white',
+                   size = 3,show.legend = F)+
+  geom_label_repel(aes(label = flg_inf, fill = flg_destaque), color = 'white',
+                   size = 3,show.legend = F,alpha=0.7)+
+  scale_fill_manual(values = c('brown2','gray66', 'palegreen3'))+
+  theme(legend.position = "bottom",
+        legend.text = element_text(size = 8, colour = "gray20"),
+        legend.title = element_blank())+
+  annotate(geom="text", x=df_cal$min_date, 
+           y=c(df_cal$q_90 , df_cal$q_10 , df_cal$media),
+           label=c("Quantil 90","Quantil 10","Média     "),
+           color=c('palegreen3','brown2','gray40'),size=3,hjust=0.5) +
+  ggtitle(label="Interesse de pesquisa sobre o PicPay no período de 1 mês",
+          subtitle = "Os números representam o interesse de pesquisa relativo ao ponto mais alto no gráfico dado um período. Um valor de 100 representa o pico de popularidade do termo PicPay.")+
+    xlab("Datas") + 
+  ylab("Score Google Trends")+
+  theme(plot.title = element_text(hjust=0.5,colour = "gray30"),
+        plot.subtitle = element_text(hjust=0.5,colour = "gray30",size=5),
+        axis.title.x = element_text(colour = "gray30"),
+        axis.title.y = element_text(colour = "gray30"),
+        axis.text.x = element_text(colour = "gray30"),
+        axis.text.y = element_text(colour = "gray30"))
+
+
+
+  
+
+```
+
+No gráfico acima temos uma linha que representa a média do Score de Interesse, a área em cinza representa o intervalo entre os quantis 10 e 90 do score. Os pontos em verde representam os dias com mais interesse nas buscas e em vermelho os dias com menos interesse.
+
+
+
+## Wordcloud
+
+-   o Wordcloud foi feito a partir das principais consultas feitas pelos usuarios que também pesquisaram a o termo "picpay".
+
+    <div>
+
+    A pontuação está em uma escala relativa, em que 100 é a consulta mais pesquisada; 50 é a consulta feita com metade dessa frequência etc.
+
+    </div>
+
+```{r}
+cria_wordcloud <- function(df){
+  green_fun=colorRampPalette(brewer.pal(9,"Greens")) #Escolhendo a cor 
+  df %>% 
+  mutate(subject=as.numeric(subject),   #Arrumando aas palavras/ termos usados 
+         value=tolower(value) , 
+         value=str_remove_all(value, pattern = "picpay|pic pay"),
+         value=str_trim(value,side = "both"),
+         value=str_remove_all(value, pattern = "do| de| da| o| a| no| na| e"),
+         value=iconv(value,from = "UTF-8",to="ASCII//TRANSLIT"),
+         value=str_trim(value,side="both"),
+         value=str_squish(value)) %>% 
+  filter(value!="") %>% 
+  group_by(value) %>% 
+  summarise(freq=sum(subject)) %>% 
+  ungroup() %>% 
+  setNames(c("word","freq")) %>% 
+  wordcloud2(color=rev(green_fun(nrow(.))))
+}
+
+  dados_gt$related_queries %>%    #Chamando a função que gera wordcloud
+  filter(related_queries=="top") %>% 
+  cria_wordcloud()
+  
+  
+
+```
+
+
+## Fim  😄
+
