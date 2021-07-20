@@ -27,7 +27,7 @@ jobs:
 
       - uses: r-lib/actions/setup-r@v1
 
-      - uses: r-lib/actions/setup-pandoc  #rmarkdown
+      - uses: r-lib/actions/setup-pandoc@v1  #rmarkdown
 
 
       - name: install pkg #colocando um arquivo com os pacotes que usei no markdown 
